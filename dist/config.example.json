@@ -1,0 +1,8 @@
+{
+  "strategy": "ipoff",
+  "v6_mode": "link_local",
+  "debounce_seconds": 5.0,
+  "observe_seconds": 0.5,
+  "interface_include": [],
+  "interface_exclude": []
+}
