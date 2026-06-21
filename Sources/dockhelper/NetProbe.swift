@@ -5,16 +5,15 @@ import SystemConfiguration
 /// fresh inventory and a throwaway store, so it's safe to invoke from either the
 /// run-loop callback thread or the Reconciler actor without shared mutable state.
 enum NetProbe {
-    static func snapshot(config: Config) -> NetSnapshot {
+    /// Returns nil when SCDynamicStore can't be created — a nil snapshot carries NO information, so
+    /// callers HOLD current state rather than acting. (The old fabricated `anyWiredActive: false`
+    /// fallback was indistinguishable from a real undock and could drive a restore-while-docked.)
+    static func snapshot(config: Config) -> NetSnapshot? {
         let inv = InterfaceInventory.resolve(config: config)
 
         guard let store = SCDynamicStoreCreate(nil, "dockhelper.probe" as CFString, nil, nil) else {
-            Log.error("NetProbe: failed to create SCDynamicStore")
-            return NetSnapshot(wifiBSD: inv.wifiBSD, ethernetBSDs: inv.ethernetBSDs,
-                               perWiredActive: [:], anyWiredActive: false,
-                               wifiAssociated: false, wifiHasRoutableIPv4: false,
-                               wifiIsPrimary: false, wifiPowerOn: WiFiRadio.isPowerOn(),
-                               primaryInterface: nil)
+            Log.error("NetProbe: failed to create SCDynamicStore — no actionable snapshot")
+            return nil
         }
 
         var perWired: [String: Bool] = [:]

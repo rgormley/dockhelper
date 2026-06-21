@@ -55,6 +55,6 @@ private func linkMonitorCallback(
     guard let info else { return }
     let monitor = Unmanaged<LinkMonitor>.fromOpaque(info).takeUnretainedValue()
     let reconciler = monitor.reconciler
-    let snap = NetProbe.snapshot(config: monitor.config)
+    guard let snap = NetProbe.snapshot(config: monitor.config) else { return }
     Task { await reconciler.handleEvent(snap) }
 }

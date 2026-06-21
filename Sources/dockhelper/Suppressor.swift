@@ -11,18 +11,24 @@ import Foundation
 /// executor is never stalled by the ~100ms `Process` wait.
 enum Suppressor {
     /// Single-home: IPv4 off, IPv6 link-local (or off). Leaves the Wi-Fi association untouched.
-    static func suppress(service: String, v6 mode: Config.V6Mode) async {
-        await run(["-setv4off", service])
+    /// Returns true only if BOTH sub-commands exited 0 — the caller must not record suppression
+    /// (advance state / trust the capture) on a partial or failed write.
+    static func suppress(service: String, v6 mode: Config.V6Mode) async -> Bool {
+        let v4ok = await run(["-setv4off", service]) == 0
+        let v6ok: Bool
         switch mode {
-        case .linkLocal: await run(["-setv6LinkLocal", service])
-        case .off:       await run(["-setv6off", service])
+        case .linkLocal: v6ok = await run(["-setv6LinkLocal", service]) == 0
+        case .off:       v6ok = await run(["-setv6off", service]) == 0
         }
+        return v4ok && v6ok
     }
 
     /// Restore to DHCP + IPv6-automatic — the only config the DHCP-only scope ever suppresses.
-    static func restore(service: String) async {
-        await run(["-setdhcp", service])
-        await run(["-setv6automatic", service])
+    /// Returns true only if BOTH sub-commands exited 0.
+    static func restore(service: String) async -> Bool {
+        let v4ok = await run(["-setdhcp", service]) == 0
+        let v6ok = await run(["-setv6automatic", service]) == 0
+        return v4ok && v6ok
     }
 
     /// Serial queue so a suppress/restore's two sub-commands can't interleave (with each other or a

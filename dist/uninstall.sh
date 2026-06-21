@@ -11,15 +11,20 @@ launchctl bootout system "$PLIST_DST" 2>/dev/null || true
 
 # If the daemon was suppressing Wi-Fi when removed, restore it BEFORE deleting state — otherwise the
 # Wi-Fi service is left with no routable IP and nothing remains to reconcile it. The capture file
-# exists only if we suppressed (and only ever for a plain-DHCP service), so DHCP + IPv6-automatic is
-# the correct restore and never clobbers a static config.
+# exists only if we suppressed a plain-DHCP service. Re-check the live config first: if the user has
+# since set a static IP, leave it untouched (never clobber a non-standard config).
 CAP="/var/db/dockhelper/capture.json"
 if [[ -f "$CAP" ]]; then
   SVC="$(/usr/bin/plutil -extract service raw "$CAP" 2>/dev/null || true)"
   if [[ -n "${SVC}" ]]; then
-    echo "restoring Wi-Fi service '${SVC}' to DHCP (it was suppressed)…"
-    /usr/sbin/networksetup -setdhcp "${SVC}" || true
-    /usr/sbin/networksetup -setv6automatic "${SVC}" || true
+    INFO="$(/usr/sbin/networksetup -getinfo "${SVC}" 2>/dev/null || true)"
+    if grep -qi 'Manual Configuration' <<< "${INFO}"; then
+      echo "Wi-Fi service '${SVC}' is now manually configured; leaving it as-is."
+    else
+      echo "restoring Wi-Fi service '${SVC}' to DHCP (it was suppressed)…"
+      /usr/sbin/networksetup -setdhcp "${SVC}" || true
+      /usr/sbin/networksetup -setv6automatic "${SVC}" || true
+    fi
   fi
 fi
 

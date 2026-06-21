@@ -13,12 +13,21 @@ enum SCNetworkConfig {
         let v4Method: String?     // IPv4 ConfigMethod, e.g. "DHCP"; nil if no IPv4 protocol
         let v6Method: String?     // IPv6 ConfigMethod, e.g. "Automatic"
 
-        /// The only config the DHCP-only scope ever suppresses: plain DHCP + IPv6-automatic.
-        /// The configured (prefs) v6 value for a normal service is "Automatic" — NOT the
-        /// "RouterAdvertisement"/"6to4" that show up only in the running State layer.
+        /// The only config the DHCP-only scope ever suppresses: plain DHCP, with IPv6 either
+        /// automatic or absent. The configured (prefs) v6 value for a normal service is "Automatic"
+        /// — NOT the "RouterAdvertisement"/"6to4" that show up only in the running State layer; a
+        /// nil v6Method (no IPv6 protocol / no ConfigMethod) is also fine, since restore is
+        /// `-setv6automatic`. Reject only a concrete static (`Manual`) v6.
         var isPlainDHCP: Bool {
             v4Method == (kSCValNetIPv4ConfigMethodDHCP as String)
-                && v6Method == (kSCValNetIPv6ConfigMethodAutomatic as String)
+                && (v6Method == (kSCValNetIPv6ConfigMethodAutomatic as String) || v6Method == nil)
+        }
+
+        /// The user has taken manual control with a static IP on v4 or v6. The daemon must never
+        /// clobber this — neither suppress it nor restore (set DHCP) over it.
+        var hasStaticConfig: Bool {
+            v4Method == (kSCValNetIPv4ConfigMethodManual as String)
+                || v6Method == (kSCValNetIPv6ConfigMethodManual as String)
         }
     }
 
@@ -31,6 +40,7 @@ enum SCNetworkConfig {
             return nil
         }
         for svc in services {
+            guard SCNetworkServiceGetEnabled(svc) else { continue }   // skip stale/disabled duplicates
             let name = SCNetworkServiceGetName(svc) as String?
             let matches: Bool
             if let override {
