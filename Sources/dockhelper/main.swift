@@ -59,8 +59,15 @@ func runDaemon() {
         return src
     }
 
+    // Reconcile to current link state (sets `acted`) BEFORE arming the monitor, so an SC callback
+    // can't race the startup transition with `acted == nil`. `start()` is async and this function is
+    // sync, so block on it with a semaphore — the same pattern the signal handler above uses. It only
+    // does SC reads + off-actor `networksetup` writes (nothing main-thread-bound), so waiting on the
+    // main thread here can't deadlock.
+    let startupDone = DispatchSemaphore(value: 0)
+    Task { await reconciler.start(); startupDone.signal() }
+    startupDone.wait()
     monitor.start()
-    Task { await reconciler.start() }
 
     Log.info("entering run loop")
     withExtendedLifetime((signalSources, monitor, reconciler)) {

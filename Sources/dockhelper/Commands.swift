@@ -10,13 +10,17 @@ enum Commands {
             return 1
         }
         let wired = s.wiredActive.filter { $0.value }.keys.sorted().joined(separator: ",")
+        // While suppressed, isPrimary/hasIP are deliberately off, so `assoc` reflects the BSSID signal
+        // alone — and a momentarily-zero BSSID can read false on a still-associated radio. Qualify the
+        // field so that transient false isn't misread as "suppression dropped the association".
+        let assocNote = s.desired == "suppressed" ? " (BSSID-only; suppressed)" : ""
         print("""
         dockhelper status
           updated:     \(s.ts)
           strategy:    \(s.strategy)
           override:    \(s.overrideEngaged ? "ENGAGED (suppression paused)" : "off")
           wired up:    \(s.anyWired)\(wired.isEmpty ? "" : " [\(wired)]")
-          wifi (\(s.wifiBSD)): assoc=\(s.wifiAssoc) ip=\(s.wifiIP) primary=\(s.wifiPrimary) powerOn=\(s.powerOn)
+          wifi (\(s.wifiBSD)): assoc=\(s.wifiAssoc)\(assocNote) ip=\(s.wifiIP) primary=\(s.wifiPrimary) powerOn=\(s.powerOn)
           primary if:  \(s.primary ?? "-")
           desired:     \(s.desired)
           last action: \(s.action)

@@ -31,7 +31,7 @@ actor Reconciler {
     private var debounceTask: Task<Void, Never>?
     private var observeTask: Task<Void, Never>?
     private var pendingSettle: Desired?
-    private var lastObservedKey: String?
+    private var lastObserved: ObserveKey?
 
     init(config: Config, wifiBSD: String) {
         self.config = config
@@ -136,6 +136,7 @@ actor Reconciler {
                 logState(snap, desired: .normal, action: "abandon-user-static(\(reason))")
                 return
             }
+            let service: String
             if !hadCapture {
                 // Fresh suppression: fail closed unless plain DHCP; record the baseline first.
                 guard let r = live, r.isPlainDHCP else {
@@ -151,12 +152,17 @@ actor Reconciler {
                 }
                 StateStore.writeCapture(Capture(service: r.serviceName, v4Method: r.v4Method ?? "",
                                                 v6Method: r.v6Method ?? "", capturedAt: Log.timestamp()))
-            }
-            guard let service = StateStore.readCapture()?.service ?? live?.serviceName else {
-                Log.warn("suppress(\(reason)): Wi-Fi service unresolvable — cannot suppress")
-                markActed(.normal)
-                logState(snap, desired: .normal, action: "suppress-unresolved(\(reason))")
-                return
+                service = r.serviceName          // already in hand — no write-then-read-back
+            } else {
+                // Resume after a restart: the capture exists (live may even be nil); address it from
+                // the recorded baseline, falling back to the live name.
+                guard let s = serviceToActuate(live: live) else {
+                    Log.warn("suppress(\(reason)): Wi-Fi service unresolvable — cannot suppress")
+                    markActed(.normal)
+                    logState(snap, desired: .normal, action: "suppress-unresolved(\(reason))")
+                    return
+                }
+                service = s
             }
             if await Suppressor.suppress(service: service, v6: config.v6Mode) {
                 markActed(.suppressed)
@@ -179,7 +185,7 @@ actor Reconciler {
                 logState(snap, desired: .normal, action: "abandon-user-static(\(reason))")
                 return
             }
-            guard let service = StateStore.readCapture()?.service ?? live?.serviceName else {
+            guard let service = serviceToActuate(live: live) else {
                 StateStore.clearCapture()        // can't address it; nothing actionable to restore
                 markActed(.normal)
                 logState(snap, desired: .normal, action: "restore-unresolved(\(reason))")
@@ -194,6 +200,13 @@ actor Reconciler {
                 logState(snap, desired: acted ?? .suppressed, action: "restore-failed#\(failureStreak)(\(reason))")
             }
         }
+    }
+
+    /// The `networksetup` key to actuate: the captured baseline's service name if present, else the
+    /// live-resolved name. Shared by the suppress-resume and restore paths; nil means the service is
+    /// unaddressable (fail closed).
+    private func serviceToActuate(live: SCNetworkConfig.Resolved?) -> String? {
+        StateStore.readCapture()?.service ?? live?.serviceName
     }
 
     /// Reached a settled conclusion (a successful write, or a deliberate stand-down): record it and
@@ -211,6 +224,17 @@ actor Reconciler {
 
     // MARK: - Observe loop (read-only sampling + override polling + missed-event/retry safety net)
 
+    /// The sampled fields whose change warrants a fresh observe line + state-file publish. Includes
+    /// the full `perWiredActive` map (not just `anyWiredActive`) so a dock-port swap that keeps a wire
+    /// up still republishes; comparing this value type also avoids building a key string every tick.
+    private struct ObserveKey: Equatable {
+        let overrideOn: Bool
+        let wiredActive: [String: Bool]
+        let wifiAssociated: Bool
+        let wifiHasRoutableIPv4: Bool
+        let primaryInterface: String?
+    }
+
     private func observeTick() async {
         guard let snap = NetProbe.snapshot(wifiBSD: wifiBSD, config: config) else { return }
         let desired = desiredState(snap)
@@ -220,10 +244,14 @@ actor Reconciler {
         } else if failureStreak != 0 {
             failureStreak = 0          // converged — clear stale backoff
         }
-        let overrideOn = FileManager.default.fileExists(atPath: Paths.overrideFlag)
-        let key = "\(overrideOn)|\(snap.anyWiredActive)|\(snap.wifiAssociated)|\(snap.wifiHasRoutableIPv4)|\(snap.primaryInterface ?? "-")"
-        if key != lastObservedKey {
-            lastObservedKey = key
+        let key = ObserveKey(
+            overrideOn: FileManager.default.fileExists(atPath: Paths.overrideFlag),
+            wiredActive: snap.perWiredActive,
+            wifiAssociated: snap.wifiAssociated,
+            wifiHasRoutableIPv4: snap.wifiHasRoutableIPv4,
+            primaryInterface: snap.primaryInterface)
+        if key != lastObserved {
+            lastObserved = key
             logState(snap, desired: acted ?? desired, action: "observe")
         }
     }

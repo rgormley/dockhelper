@@ -44,7 +44,22 @@ enum SCNetworkConfig {
             let name = SCNetworkServiceGetName(svc) as String?
             let matches: Bool
             if let override {
-                matches = (name == override)
+                if name == override {
+                    // Name matched; require it to actually be a Wi-Fi (IEEE80211) interface so a
+                    // misconfigured override colliding with a non-Wi-Fi service name can't get that
+                    // service's IPv4 stripped on dock. A legit override to a *different* Wi-Fi service
+                    // (BSD ≠ the frozen wifiBSD) still passes.
+                    let type = SCNetworkServiceGetInterface(svc)
+                        .flatMap { SCNetworkInterfaceGetInterfaceType($0) as String? }
+                    if type == (kSCNetworkInterfaceTypeIEEE80211 as String) {
+                        matches = true
+                    } else {
+                        Log.warn("wifi_service override '\(override)' matched a non-IEEE80211 service (type \(type ?? "?")) — ignoring (fail-closed)")
+                        matches = false
+                    }
+                } else {
+                    matches = false
+                }
             } else {
                 let bsd = SCNetworkServiceGetInterface(svc)
                     .flatMap { SCNetworkInterfaceGetBSDName($0) as String? }
