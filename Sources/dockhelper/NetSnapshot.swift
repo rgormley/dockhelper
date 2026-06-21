@@ -13,7 +13,6 @@ struct NetSnapshot: Sendable, Codable {
     let wifiAssociated: Bool
     let wifiHasRoutableIPv4: Bool
     let wifiIsPrimary: Bool
-    let wifiPowerOn: Bool
     let primaryInterface: String?
 
     func json() -> String {

@@ -8,8 +8,12 @@ enum NetProbe {
     /// Returns nil when SCDynamicStore can't be created — a nil snapshot carries NO information, so
     /// callers HOLD current state rather than acting. (The old fabricated `anyWiredActive: false`
     /// fallback was indistinguishable from a real undock and could drive a restore-while-docked.)
-    static func snapshot(config: Config) -> NetSnapshot? {
-        let inv = InterfaceInventory.resolve(config: config)
+    ///
+    /// `wifiBSD` is the frozen startup value (single source of truth, shared with the Reconciler);
+    /// the ethernet list IS re-enumerated each call (dock interfaces appear/disappear). Pure SC —
+    /// no CoreWLAN on this hot path (radio power is read only at publish time, in `logState`).
+    static func snapshot(wifiBSD: String, config: Config) -> NetSnapshot? {
+        let ethernetBSDs = InterfaceInventory.ethernets(config: config)
 
         guard let store = SCDynamicStoreCreate(nil, "dockhelper.probe" as CFString, nil, nil) else {
             Log.error("NetProbe: failed to create SCDynamicStore — no actionable snapshot")
@@ -18,26 +22,25 @@ enum NetProbe {
 
         var perWired: [String: Bool] = [:]
         var anyWired = false
-        for bsd in inv.ethernetBSDs {
+        for bsd in ethernetBSDs {
             let active = linkActive(store, bsd)
             perWired[bsd] = active
             if active { anyWired = true }
         }
 
         let primary = primaryInterface(store)
-        let isPrimary = (primary == inv.wifiBSD)
-        let hasIP = wifiHasIPv4(store, inv.wifiBSD)
-        let bssid = wifiHasBSSID(store, inv.wifiBSD)
+        let isPrimary = (primary == wifiBSD)
+        let hasIP = wifiHasIPv4(store, wifiBSD)
+        let bssid = wifiHasBSSID(store, wifiBSD)
 
         return NetSnapshot(
-            wifiBSD: inv.wifiBSD,
-            ethernetBSDs: inv.ethernetBSDs,
+            wifiBSD: wifiBSD,
+            ethernetBSDs: ethernetBSDs,
             perWiredActive: perWired,
             anyWiredActive: anyWired,
             wifiAssociated: bssid || isPrimary || hasIP,
             wifiHasRoutableIPv4: hasIP,
             wifiIsPrimary: isPrimary,
-            wifiPowerOn: WiFiRadio.isPowerOn(),
             primaryInterface: primary)
     }
 

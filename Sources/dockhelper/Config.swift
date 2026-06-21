@@ -20,9 +20,13 @@ struct Config: Codable, Sendable {
     /// Override the Wi-Fi service name; nil auto-resolves it from the BSD via SystemConfiguration.
     var wifiServiceOverride: String? = nil
 
-    /// A link transition must stay settled this long before we act (flap suppression). Defaults
-    /// high enough to ride a dock's Ethernet bring-up flap without thrashing suppression.
+    /// A link transition must stay settled this long before we SUPPRESS (flap suppression).
+    /// Defaults high enough to ride a dock's Ethernet bring-up flap without thrashing.
     var debounceSeconds: Double = 5.0
+
+    /// Settle window before RESTORING on undock. Short by default — restore is the fast path
+    /// (recover connectivity quickly); only the suppress side needs the longer flap ride-through.
+    var restoreDebounceSeconds: Double = 0.5
 
     /// Read-only state sampling cadence (also the override-flag polling interval).
     var observeSeconds: Double = 0.5
@@ -39,6 +43,7 @@ struct Config: Codable, Sendable {
         case v6Mode = "v6_mode"
         case wifiServiceOverride = "wifi_service"
         case debounceSeconds = "debounce_seconds"
+        case restoreDebounceSeconds = "restore_debounce_seconds"
         case observeSeconds = "observe_seconds"
         case interfaceInclude = "interface_include"
         case interfaceExclude = "interface_exclude"
@@ -51,6 +56,7 @@ struct Config: Codable, Sendable {
         v6Mode = try c.decodeIfPresent(V6Mode.self, forKey: .v6Mode) ?? def.v6Mode
         wifiServiceOverride = try c.decodeIfPresent(String.self, forKey: .wifiServiceOverride) ?? def.wifiServiceOverride
         debounceSeconds = try c.decodeIfPresent(Double.self, forKey: .debounceSeconds) ?? def.debounceSeconds
+        restoreDebounceSeconds = try c.decodeIfPresent(Double.self, forKey: .restoreDebounceSeconds) ?? def.restoreDebounceSeconds
         observeSeconds = try c.decodeIfPresent(Double.self, forKey: .observeSeconds) ?? def.observeSeconds
         interfaceInclude = try c.decodeIfPresent([String].self, forKey: .interfaceInclude) ?? def.interfaceInclude
         interfaceExclude = try c.decodeIfPresent([String].self, forKey: .interfaceExclude) ?? def.interfaceExclude

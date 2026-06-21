@@ -6,12 +6,14 @@ import SystemConfiguration
 final class LinkMonitor {
     let reconciler: Reconciler
     let config: Config
+    let wifiBSD: String
     private var store: SCDynamicStore?
     private var runLoopSource: CFRunLoopSource?
 
-    init(reconciler: Reconciler, config: Config) {
+    init(reconciler: Reconciler, config: Config, wifiBSD: String) {
         self.reconciler = reconciler
         self.config = config
+        self.wifiBSD = wifiBSD
     }
 
     func start() {
@@ -55,6 +57,6 @@ private func linkMonitorCallback(
     guard let info else { return }
     let monitor = Unmanaged<LinkMonitor>.fromOpaque(info).takeUnretainedValue()
     let reconciler = monitor.reconciler
-    guard let snap = NetProbe.snapshot(config: monitor.config) else { return }
+    guard let snap = NetProbe.snapshot(wifiBSD: monitor.wifiBSD, config: monitor.config) else { return }
     Task { await reconciler.handleEvent(snap) }
 }

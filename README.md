@@ -73,7 +73,8 @@ overrides only what it sets; missing keys use defaults). See
 |---|---|---|
 | `strategy` | `ipoff` | only `ipoff` is implemented; reserved for a future radio-off fallback |
 | `v6_mode` | `link_local` | IPv6 while suppressed: `link_local` or `off` |
-| `debounce_seconds` | `5.0` | settle window before acting on a link change (rides a dock's bring-up flap) |
+| `debounce_seconds` | `5.0` | settle window before **suppressing** (rides a dock's Ethernet bring-up flap) |
+| `restore_debounce_seconds` | `0.5` | settle window before **restoring** on undock — short, for fast connectivity recovery |
 | `observe_seconds` | `0.5` | state-sampling / override-poll cadence |
 | `wifi_service` | (auto) | Wi-Fi service name; omitted ⇒ auto-resolved from the BSD via SystemConfiguration |
 | `interface_include` / `interface_exclude` | `[]` | restrict which BSD names count as wired |

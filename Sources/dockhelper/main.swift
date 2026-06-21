@@ -27,7 +27,7 @@ func runDaemon() {
     }
 
     let reconciler = Reconciler(config: config, wifiBSD: inv.wifiBSD)
-    let monitor = LinkMonitor(reconciler: reconciler, config: config)
+    let monitor = LinkMonitor(reconciler: reconciler, config: config, wifiBSD: inv.wifiBSD)
 
     // SIG_IGN the default disposition so the source — not the kernel's default terminate —
     // gets the signal. Sources run on the main queue (drained by CFRunLoopRun) and are
@@ -36,10 +36,23 @@ func runDaemon() {
         signal(sig, SIG_IGN)
         let src = DispatchSource.makeSignalSource(signal: sig, queue: .main)
         src.setEventHandler {
-            // ipoff is sticky: we do NOT restore on exit. If suppressed while docked the IP config
-            // stays stripped; the daemon reconciles on next launch (stays suppressed if still
-            // docked, restores on undock). Permanent removal restores via uninstall.sh.
-            Log.info("caught signal \(sig); exiting (suppression, if any, persists until next launch).")
+            // Clean stop (bootout / unload / shutdown / kill -TERM): if we suppressed Wi-Fi and the
+            // user hasn't since taken manual control, restore it before exiting — once the job is
+            // gone nothing else will. (A crash bypasses this handler; KeepAlive's restart just
+            // re-suppresses, so there's no strand there.)
+            if let cap = StateStore.readCapture(),
+               SCNetworkConfig.resolve(wifiBSD: inv.wifiBSD, override: config.wifiServiceOverride)?.hasStaticConfig != true {
+                let sem = DispatchSemaphore(value: 0)
+                Task {
+                    _ = await Suppressor.restore(service: cap.service)
+                    StateStore.clearCapture()
+                    sem.signal()
+                }
+                sem.wait()
+                Log.info("caught signal \(sig); restored Wi-Fi (was suppressed); exiting.")
+            } else {
+                Log.info("caught signal \(sig); exiting (nothing to restore).")
+            }
             exit(0)
         }
         src.resume()

@@ -41,7 +41,7 @@ actor Reconciler {
     /// Reconcile to current state at launch (no debounce) and start the observe loop. Idempotent
     /// via the capture file, so a crash or a reboot-while-docked resumes correctly.
     func start() async {
-        guard let snap = NetProbe.snapshot(config: config) else {
+        guard let snap = NetProbe.snapshot(wifiBSD: wifiBSD, config: config) else {
             Log.warn("initial: probe unavailable; deferring reconcile to the observe loop")
             startObserveLoop()
             return
@@ -80,7 +80,7 @@ actor Reconciler {
         // A fresh transition rides the debounce window; once writes start failing, this same timer
         // becomes the retry timer and stretches per the backoff schedule.
         let window: Duration =
-            failureStreak == 0 ? .seconds(config.debounceSeconds) :
+            failureStreak == 0 ? .seconds(desired == .suppressed ? config.debounceSeconds : config.restoreDebounceSeconds) :
             failureStreak < Self.fastRetryAttempts ? Self.fastRetry :
             Self.slowRetry
         debounceTask = Task { [weak self] in
@@ -92,7 +92,7 @@ actor Reconciler {
 
     private func settle(_ desired: Desired) async {
         pendingSettle = nil
-        guard let snap = NetProbe.snapshot(config: config) else {
+        guard let snap = NetProbe.snapshot(wifiBSD: wifiBSD, config: config) else {
             Log.debug("settle: probe unavailable; observe loop will retry")
             return
         }
@@ -141,7 +141,11 @@ actor Reconciler {
                 guard let r = live, r.isPlainDHCP else {
                     let why = live.map { "v4=\($0.v4Method ?? "?") v6=\($0.v6Method ?? "?")" } ?? "unresolved"
                     Log.warn("suppress(\(reason)): Wi-Fi not plain DHCP (\(why)) — NOT suppressing (fail-closed)")
-                    markActed(.normal)
+                    // Stand down, but throttle the re-check to the slow (~60s) window so a
+                    // static-config host doesn't livelock the observe loop. Self-heals: a switch to
+                    // plain DHCP suppresses within one slow window; undock converges and clears it.
+                    acted = .normal
+                    failureStreak = Self.fastRetryAttempts
                     logState(snap, desired: .normal, action: "skip-nonstandard(\(reason))")
                     return
                 }
@@ -208,7 +212,7 @@ actor Reconciler {
     // MARK: - Observe loop (read-only sampling + override polling + missed-event/retry safety net)
 
     private func observeTick() async {
-        guard let snap = NetProbe.snapshot(config: config) else { return }
+        guard let snap = NetProbe.snapshot(wifiBSD: wifiBSD, config: config) else { return }
         let desired = desiredState(snap)
         if desired != acted {
             Log.debug("observe: desired \(acted?.rawValue ?? "nil")→\(desired.rawValue); reconciling")
@@ -217,7 +221,7 @@ actor Reconciler {
             failureStreak = 0          // converged — clear stale backoff
         }
         let overrideOn = FileManager.default.fileExists(atPath: Paths.overrideFlag)
-        let key = "\(overrideOn)|\(snap.anyWiredActive)|\(snap.wifiAssociated)|\(snap.wifiHasRoutableIPv4)|\(snap.primaryInterface ?? "-")|\(snap.wifiPowerOn)"
+        let key = "\(overrideOn)|\(snap.anyWiredActive)|\(snap.wifiAssociated)|\(snap.wifiHasRoutableIPv4)|\(snap.primaryInterface ?? "-")"
         if key != lastObservedKey {
             lastObservedKey = key
             logState(snap, desired: acted ?? desired, action: "observe")
@@ -250,7 +254,7 @@ actor Reconciler {
             wifiIP: snap.wifiHasRoutableIPv4,
             wifiPrimary: snap.wifiIsPrimary,
             primary: snap.primaryInterface,
-            powerOn: snap.wifiPowerOn,
+            powerOn: WiFiRadio.isPowerOn(),   // read at publish time only — off the snapshot hot path
             desired: desired.rawValue,
             action: action)
         Log.raw(state.json())
